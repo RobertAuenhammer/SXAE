@@ -1,8 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 Created on Tue Jan 24 08:54:57 2023
-
-@author: robaue
 """
 # # -*- coding: utf-8 -*-
 # Created on Mon Jan 18 19:58:03 2021
@@ -13,8 +11,8 @@ import scipy.io
 import time
 import matplotlib.pyplot as plt
 
-from functions import Mori_Tanaka, E__, E__update, Mori_Tanaka_local_Vf, Rotate_z_E__, Transform_cyl_E__
-from E_plots import plot_compare_E11_histogram, plot_compare_E22_histogram, plot_compare_E33_histogram, plot_compare_Exx_histogram, plot_compare_Err_histogram, plot_compare_Ethth_histogram
+from functions import computeMT, computeMT_local, computeStiff_m, computeStiff_f, computeEshelby, E__, E__update, Rotate_z_E__
+from C_plots import plot_compare_E11_histogram, plot_compare_E22_histogram, plot_compare_E33_histogram
 ##----------------------------------------------------------------------------------------------------------------------
 #%%
 start        = time.time()
@@ -23,19 +21,23 @@ data_path    = '../data'
 results_path = '../results'
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Define Constituent properties
-Vf_mean = 0.199
-Em      = 4.48e+9          #[Pa]
-num     = 0.35
-Gm      = 0.5/(1+num)*Em   #[Pa]
-C11_f   = 237.3e9          #[Pa]
-C22_f   = 30.9e9           #[Pa]
-C12_f   = 12.2e9           #[Pa]
-C13_f   = 9.7e9            #[Pa]
-C66_f   = 10.9e9           #[Pa]
+Vf_mean  = 0.25
+Em       = 4.48e+9          #[Pa]
+num      = 0.35
 
-a1      = 100e-6            #[m]
-a2      = 3.5e-6            #[m]
-a3      = 3.5e-6            #[m]
+E1f      = 294e9            #[Pa]
+E2f      = 19e9             #[Pa]
+E3f      = 19e9             #[Pa]
+G12f     = 27e9             #[Pa]
+G13f     = 27e9             #[Pa]
+G23f     = 7e9              #[Pa]
+nu12f    = 0.2
+nu13f    = 0.2
+nu23f    = 0.7
+#%% Define fibre dimensions
+a1       = 50e-6             #[m]
+a2       = 3.5e-6            #[m]
+a3       = 3.5e-6            #[m]
 #%%
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Load tomography data
@@ -46,14 +48,16 @@ scatt_pure_peek = scipy.io.loadmat(os.path.join(data_path, 'scatt_pure_peek.mat'
 print('Data loaded')
 ##----------------------------------------------------------------------------------------------------------------------
 #%% 
+#Reduced data size
 #The fiber orientation should be chosen from the data as 
 #ori = vec(x_ind, y_ind, z_ind, :, 3). 
-ori    = eig_vec_full[:,:,:,:,2]
-# Scattering in xy-plane == 2nd Eigenvalue
-scat_12  = eig_val_full[:,:,:,0]
-# Scattering in xz-plane == 3nd Eigenvalue
-scat_13  = eig_val_full[:,:,:,1]
-
+ori    = eig_vec_full[200:203,200:203,200:203,:,2]
+# 1st Eigenvalue
+lambda1  = eig_val_full[200:203,200:203,200:203,0]
+# 2nd Eigenvalue
+lambda2  = eig_val_full[200:203,200:203,200:203,1]
+# 3rd Eigenvalue
+lambda3  = eig_val_full[200:203,200:203,200:203,2]
 ##-----------------------------------------------------------------------------
 mean_scattering_cf_peek    = np.mean(scatt[:,:,:,2], where=scatt[:,:,:,2]>0)
 mean_scattering_pure_peek  = np.mean(scatt_pure_peek[:,:,:,2], where=scatt_pure_peek[:,:,:,2]>0)
@@ -64,7 +68,7 @@ scatt_threshold  = 0.1*mean_scattering_cf_peek
 print('Initialisation done')
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Write Abaqus input file
-binning     = 4
+binning     = 1
 voxelsize   = 100
 es          = voxelsize*binning
 noNo        = (int(ori.shape[0]/binning+1))*int((ori.shape[1]/binning+1))*int((ori.shape[2]/binning)+1)
@@ -76,7 +80,7 @@ elements    = elements.astype(int)
 x_shape     = int(ori.shape[0]/binning)
 y_shape     = int(ori.shape[1]/binning)
 z_shape     = int(ori.shape[2]/binning)
-
+print(x_shape,y_shape,z_shape)
 
 startX=0
 startY=0
@@ -85,107 +89,107 @@ kk=0
 ee=1
 
 nodes = np.empty((noNo, 4))
-with open(script_name+'_mesh.inp','w') as output:
+with open(os.path.join(results_path, 'mesh.inp'), 'w') as output:
     output.write('*Node' '\n')
     
     for l in range(0,z_shape):
         for k in range(0,y_shape+1):
             for h in range(0,x_shape+1):
                 kk=kk+1
-                if scatt[h*binning,k*binning,l*binning,2] > scatt_threshold: 
-                   # Node definition
-                    n8 = kk
-                    n7 = kk+1
-                    n5 = kk+x_shape+1
-                    n6 = kk+x_shape+1+1
-                    n4 = kk+(x_shape+1)*(y_shape+1)
-                    n3 = kk+(x_shape+1)*(y_shape+1)+1
-                    n1 = kk+(x_shape+1)*(y_shape+1)+x_shape+1
-                    n2 = kk+(x_shape+1)*(y_shape+1)+1+x_shape+1
+                # Node definition
+                n8 = kk
+                n7 = kk+1
+                n5 = kk+x_shape+1
+                n6 = kk+x_shape+1+1
+                n4 = kk+(x_shape+1)*(y_shape+1)
+                n3 = kk+(x_shape+1)*(y_shape+1)+1
+                n1 = kk+(x_shape+1)*(y_shape+1)+x_shape+1
+                n2 = kk+(x_shape+1)*(y_shape+1)+1+x_shape+1
 
-                    if l == z_shape or k == y_shape or h == x_shape:
-                        ee = ee-1
-                    else:
-                        elements[ee-1,0] = ee
-                        elements[ee-1,8] = n8
-                        elements[ee-1,7] = n7
-                        elements[ee-1,5] = n5
-                        elements[ee-1,6] = n6
-                        elements[ee-1,4] = n4
-                        elements[ee-1,3] = n3
-                        elements[ee-1,1] = n1
-                        elements[ee-1,2] = n2
+                if l == z_shape or k == y_shape or h == x_shape:
+                    ee = ee-1
+                else:
+                    elements[ee-1,0] = ee
+                    elements[ee-1,8] = n8
+                    elements[ee-1,7] = n7
+                    elements[ee-1,5] = n5
+                    elements[ee-1,6] = n6
+                    elements[ee-1,4] = n4
+                    elements[ee-1,3] = n3
+                    elements[ee-1,1] = n1
+                    elements[ee-1,2] = n2
 
 #                       Node 8:
-                        nodes[n8-1,0] = n8
-                        nodes[n8-1,1] = startX+h*es
-                        nodes[n8-1,2] = startY+k*es
-                        nodes[n8-1,3] = startZ+l*es
+                    nodes[n8-1,0] = n8
+                    nodes[n8-1,1] = startX+h*es
+                    nodes[n8-1,2] = startY+k*es
+                    nodes[n8-1,3] = startZ+l*es
 
 
 #                       Node 7:
-                        nodes[n7-1,0] = n7
-                        nodes[n7-1,1] = startX+h*es + es
-                        nodes[n7-1,2] = startY+k*es
-                        nodes[n7-1,3] = startZ+l*es
+                    nodes[n7-1,0] = n7
+                    nodes[n7-1,1] = startX+h*es + es
+                    nodes[n7-1,2] = startY+k*es
+                    nodes[n7-1,3] = startZ+l*es
 
 
 #                       Node 6:                
-                        nodes[n6-1,0] = n6
-                        nodes[n6-1,1] = startX+h*es + es
-                        nodes[n6-1,2] = startY+k*es + es
-                        nodes[n6-1,3] = startZ+l*es
+                    nodes[n6-1,0] = n6
+                    nodes[n6-1,1] = startX+h*es + es
+                    nodes[n6-1,2] = startY+k*es + es
+                    nodes[n6-1,3] = startZ+l*es
 
 
 #                       Node 5:
-                        nodes[n5-1,0] = n5
-                        nodes[n5-1,1] = startX+h*es
-                        nodes[n5-1,2] = startY+k*es + es
-                        nodes[n5-1,3] = startZ+l*es
+                    nodes[n5-1,0] = n5
+                    nodes[n5-1,1] = startX+h*es
+                    nodes[n5-1,2] = startY+k*es + es
+                    nodes[n5-1,3] = startZ+l*es
 
 
 #                       Node 4:
-                        nodes[n4-1,0] = n4
-                        nodes[n4-1,1] = startX+h*es
-                        nodes[n4-1,2] = startY+k*es
-                        nodes[n4-1,3] = startZ+l*es + es
+                    nodes[n4-1,0] = n4
+                    nodes[n4-1,1] = startX+h*es
+                    nodes[n4-1,2] = startY+k*es
+                    nodes[n4-1,3] = startZ+l*es + es
 
 
 #                       Node 3:
-                        nodes[n3-1,0] = n3
-                        nodes[n3-1,1] = startX+h*es + es
-                        nodes[n3-1,2] = startY+k*es
-                        nodes[n3-1,3] = startZ+l*es + es
+                    nodes[n3-1,0] = n3
+                    nodes[n3-1,1] = startX+h*es + es
+                    nodes[n3-1,2] = startY+k*es
+                    nodes[n3-1,3] = startZ+l*es + es
 
 
 #                       Node 2:                        
-                        nodes[n2-1,0] = n2
-                        nodes[n2-1,1] = startX+h*es + es
-                        nodes[n2-1,2] = startY+k*es + es
-                        nodes[n2-1,3] = startZ+l*es + es
+                    nodes[n2-1,0] = n2
+                    nodes[n2-1,1] = startX+h*es + es
+                    nodes[n2-1,2] = startY+k*es + es
+                    nodes[n2-1,3] = startZ+l*es + es
 
- 
+
 #                       Node 1:
-                        nodes[n1-1,0] = n1
-                        nodes[n1-1,1] = startX+h*es
-                        nodes[n1-1,2] = startY+k*es + es
-                        nodes[n1-1,3] = startZ+l*es + es
-                        
-                        X0              = startX+h*es
-                        Y0              = startY+k*es
-                        Z0              = startZ+l*es
-                        
-                        IP_coords[ee-1][0][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.785]
-                        IP_coords[ee-1][1][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.785]
-                        IP_coords[ee-1][2][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.785]
-                        IP_coords[ee-1][3][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.785]
-                        IP_coords[ee-1][4][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.215]
-                        IP_coords[ee-1][5][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.215]
-                        IP_coords[ee-1][6][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.215]
-                        IP_coords[ee-1][7][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.215]     
+                    nodes[n1-1,0] = n1
+                    nodes[n1-1,1] = startX+h*es
+                    nodes[n1-1,2] = startY+k*es + es
+                    nodes[n1-1,3] = startZ+l*es + es
+                    
+                    X0              = startX+h*es
+                    Y0              = startY+k*es
+                    Z0              = startZ+l*es
+                    
+                    IP_coords[ee-1][0][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.785]
+                    IP_coords[ee-1][1][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.785]
+                    IP_coords[ee-1][2][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.785]
+                    IP_coords[ee-1][3][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.785]
+                    IP_coords[ee-1][4][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.215]
+                    IP_coords[ee-1][5][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.215]
+                    IP_coords[ee-1][6][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.215]
+                    IP_coords[ee-1][7][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.215]     
 
-                    ee=ee+1                   
+                    ee=ee+1           
     noEl      = ee-1
+    print(noEl)
     IP_coords = IP_coords[0:noEl]
     print('Integration point array created')
     print('Arrays created')
@@ -200,8 +204,9 @@ with open(script_name+'_mesh.inp','w') as output:
     x_offset         = -20.001e3
     y_offset         = -11.590e3
     z_offset         = -14.601e3
-
+    
     IP_coords_off        = np.empty((noEl,8,3))
+
     IP_coords_off[:,:,0] = IP_coords[:,:,0] + x_offset
     IP_coords_off[:,:,1] = IP_coords[:,:,1] + y_offset
     IP_coords_off[:,:,2] = IP_coords[:,:,2] + z_offset
@@ -265,14 +270,22 @@ with open(script_name+'_mesh.inp','w') as output:
     output.write('**--------------------------------------------------------------------------------------------------------------------------------------------------------------------' '\n')
 print('Modell created') 
 ##----------------------------------------------------------------------------------------------------------------------
-#%% Calculate Mori-Tanaka tensor
-C_MT   = Mori_Tanaka(Vf_mean, Em, num, Gm, C11_f, C22_f, C12_f, C13_f, C66_f, a1, a2, a3, script_name)
-C_MT   = np.asarray(C_MT)
-C_11_0 = C_MT[0]
-C_22_0 = C_MT[1]
-C_66_0 = C_MT[2]
-C_12_0 = C_MT[3]
-C_23_0 = C_MT[4]
+#%% Mori-Tanaka tensor
+# Compute stiffness matrices of fibre and matrix
+C_f = computeStiff_f(E1f, E2f, E3f, G12f, G13f, G23f, nu12f, nu13f, nu23f)
+C_m = computeStiff_m(num, Em)
+
+# Comput Eshelby Tensor 
+Eshelby   = computeEshelby(num, a1,a2,a3)
+
+# Compute Mori-Tanaka stiffness tensor
+C_MT    = computeMT(C_f, C_m, Eshelby, Vf_mean, results_path)
+C_MT    = np.asarray(C_MT)
+C_11_0 = C_MT[0,0]
+C_22_0 = C_MT[1,1]
+C_66_0 = C_MT[4,4]
+C_12_0 = C_MT[0,1]
+C_23_0 = C_MT[1,2]
 print('C_MT_11', f'{C_11_0/1e9:.2f}', 'GPa')
 print('C_MT_22', f'{C_22_0/1e9:.2f}', 'GPa')
 print('C_MT_66', f'{C_66_0/1e9:.2f}', 'GPa')
@@ -344,11 +357,9 @@ oE63 = np.empty((noEl,8))
 oE66 = np.empty((noEl,8))
 
 
-C_f  = np.load(f'001_C_f_{script_name}.npy')
-C_m  = np.load(f'001_C_m_{script_name}.npy')
-B_MT = np.load(f'001_B_MT_{script_name}.npy')
-A_MT = np.load(f'001_A_MT_{script_name}.npy')
-
+C_m9    = np.load(os.path.join(results_path, '001_C_m9.npy'))
+C_f9    = np.load(os.path.join(results_path, '001_C_f9.npy'))
+A_MT9   = np.load(os.path.join(results_path, '001_A_MT9.npy'))
 
 a=0
 for j in range(noEl):
@@ -359,49 +370,50 @@ for j in range(noEl):
         g3=int(IP_coords[j][i][2]/voxelsize)
         
        
+        ori_s = np.sign(ori[g1,g2,g3,0])*ori[g1,g2,g3,:]
         #Calculate theta
-        theta_center = np.arccos(ori[g1,g2,g3,2])
+        theta_center = np.arccos((ori_s[2]))
         
         #Calculate phi
-        if abs(ori[g1,g2,g3,0]/np.sin(theta_center))>1:
-            phi_center=0
-        else:
-            phi_center   = np.arccos(ori[g1,g2,g3,0]/np.sin(theta_center))
+        phi_center = np.arctan(ori_s[1]/ori_s[0])
+        if np.isnan(phi_center) == True:
+            phi_center   = np.pi/2
+            theta_center = np.pi/2
         
 
-        ##Assumed linear relation between the scattering values (0...1) and the angles (0...90)
-        ## I do not need to rotate the scattering, as the eigenvectors multiplied with the eigenvalues rotated to the global coordinate system stay the same lengthwise
-
-        if scat_12[g1,g2,g3] > 0:
-            phi_intervall   = scat_12[g1,g2,g3]*np.pi/2
+        ##Assumed linear relation between the Directional Anisotropy values (0...1) and the angles (0...90)
+        DA_xy = lambda3[g1,g2,g3]/lambda1[g1,g2,g3]
+        if DA_xy > 0:
+            phi_intervall   = DA_xy*np.pi/2
             phi_scat=np.arange(phi_center-phi_intervall/2, phi_center+phi_intervall/2, phi_intervall/10)
         else:
             phi_scat=np.array((phi_center, phi_center))
             
-        if scat_13[g1,g2,g3] > 0:
-            theta_intervall = scat_13[g1,g2,g3]*np.pi/2
+        DA_xz = lambda3[g1,g2,g3]/lambda2[g1,g2,g3]    
+        if DA_xz > 0:
+            theta_intervall = DA_xz*np.pi/2
             theta_scat = np.arange(theta_center-theta_intervall/2, theta_center+theta_intervall/2, theta_intervall/10)
         else:
             theta_scat = np.array((theta_center, theta_center))
         #=========================================================================
         ## Local fibre volume fraction
         #=========================================================================
-        if Vf_tomo[g1,g2,g3]   < 0.05:
-            Vf         = 0.05
-        elif Vf_tomo[g1,g2,g3] > 0.5:   
-            Vf         = 0.5
+        if Vf_tomo[g1,g2,g3]   < 0.1:
+            Vf         = 0.1
+        elif Vf_tomo[g1,g2,g3] > 0.4:   
+            Vf         = 0.4
         else:    
             Vf         = Vf_tomo[g1,g2,g3]
  
-        C_MT           = Mori_Tanaka_local_Vf(Vf, C_f, C_m, B_MT, A_MT)
+        C_MT           = computeMT_local(C_m9, C_f9, A_MT9, Vf)
         C_MT           = np.asarray(C_MT)        
-        C_11           = C_MT[0]
-        C_22           = C_MT[1]
-        C_66           = C_MT[2]
-        C_12           = C_MT[3]
-        C_23           = C_MT[4]
+        C_11           = C_MT[0,0]
+        C_22           = C_MT[1,1]
+        C_66           = C_MT[5,5]
+        C_12           = C_MT[0,1]
+        C_23           = C_MT[1,2]
         #=========================================================================
-        
+
         C              = E__update(phi_scat, theta_scat, C_11, C_22, C_66, C_12, C_23)
         C              = np.asarray(C)
         C              = C/1e6
@@ -487,12 +499,7 @@ for j in range(noEl):
         oE66[j,i]      = C[29]
 print('Amount of evaluations', a)
 print('Orientation recalculation done')
-##----------------------------------------------------------------------------------------------------------------------
 #%% Rotate Stiffness matrices
-
-alpha=90
-alpha=np.deg2rad(alpha)
-
 # Updated Matrix
 C_rot              = Rotate_z_E__(alpha, nE11, nE12, nE13, nE14, nE15, nE16, nE22, nE23, nE24, nE25, nE26, nE33, nE34, nE35, nE36, nE41, nE42, nE43, nE44, nE45, nE46, nE51, nE52, nE53, nE55, nE56, nE61, nE62, nE63, nE66)
 C_rot              = np.asarray(C_rot)
@@ -571,23 +578,7 @@ oE62_rot           = C_rot[27]
 oE63_rot           = C_rot[28]
 oE66_rot           = C_rot[29]
 ##----------------------------------------------------------------------------------------------------------------------
-#%% Transform to cylindrical system
-C_cyl = Transform_cyl_E__(beta, nE11_rot, nE22_rot, nE24_rot, nE23_rot, nE33_rot, nE34_rot, nE42_rot, nE43_rot, nE44_rot)
-C_cyl = np.asarray(C_cyl)
-
-nExx          = C_cyl[0]
-nErr          = C_cyl[1]
-nEthth        = C_cyl[2]
-
-C_cyl = Transform_cyl_E__(beta, oE11_rot, oE22_rot, oE24_rot, oE23_rot, oE33_rot, oE34_rot, oE42_rot, oE43_rot, oE44_rot)
-C_cyl = np.asarray(C_cyl)
-
-oExx          = C_cyl[0]
-oErr          = C_cyl[1]
-oEthth        = C_cyl[2]
-##----------------------------------------------------------------------------------------------------------------------
-#%% MAPPING OUTPUT
-with open('../results/Stiffness_Tensor_Components.f','w') as output:
+with open(os.path.join(results_path, 'Stiffness_Matrix_Components.f'), 'w') as output:
     output.write(f'      real*8 E11({8},{noEl})' '\n')
     output.write(f'      real*8 E12({8},{noEl})' '\n')
     output.write(f'      real*8 E13({8},{noEl})' '\n')
@@ -689,7 +680,6 @@ with open('../results/Stiffness_Tensor_Components.f','w') as output:
 print('Output done')
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Print plots
-
 fig_theme='default'
 save_tif='True'
 save_svg='True'
@@ -699,41 +689,6 @@ plot_compare_E11_histogram(nE11_rot, oE11_rot, script_name,results_path,fig_them
 plot_compare_E22_histogram(nE22_rot, oE22_rot, script_name,results_path,fig_theme,save_tif,save_svg)
 #%% Comparison E33 
 plot_compare_E33_histogram(nE33_rot, oE33_rot, script_name,results_path,fig_theme,save_tif,save_svg) 
-#%%
-##------------------------------------
-fig_theme='dark'
-save_tif='True'
-save_svg='True'
-#%% Comparison E11 
-plot_compare_E11_histogram(nE11_rot, oE11_rot, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison E22 
-plot_compare_E22_histogram(nE22_rot, oE22_rot, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison E33 
-plot_compare_E33_histogram(nE33_rot, oE33_rot, script_name,results_path,fig_theme,save_tif,save_svg)
-
-#%% Cylindrical system
-fig_theme='default'
-save_tif='True'
-save_svg='True'
-#%% Comparison Exx 
-plot_compare_Exx_histogram(nExx, oExx, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison Err 
-plot_compare_Err_histogram(nErr, oErr, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison Ethth 
-plot_compare_Ethth_histogram(nEthth, oEthth, script_name,results_path,fig_theme,save_tif,save_svg) 
-#%%
-##------------------------------------
-fig_theme='dark'
-save_tif='True'
-save_svg='True'
-#%% Comparison Exx 
-plot_compare_Exx_histogram(nExx, oExx, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison Err 
-plot_compare_Err_histogram(nErr, oErr, script_name,results_path,fig_theme,save_tif,save_svg)
-#%% Comparison Ethth 
-plot_compare_Ethth_histogram(nEthth, oEthth, script_name,results_path,fig_theme,save_tif,save_svg) 
- 
-print('Histograms plotted')
 #%% 
 end = time.time()
 print("The computation time was:", end-start)
