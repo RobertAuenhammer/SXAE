@@ -187,7 +187,7 @@ with open(os.path.join(results_path, 'mesh.inp'), 'w') as output:
                     IP_coords[ee-1][6][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.215]
                     IP_coords[ee-1][7][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.215]     
 
-                    ee=ee+1           
+                ee=ee+1           
     noEl      = ee-1
     print(noEl)
     IP_coords = IP_coords[0:noEl]
