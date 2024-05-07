@@ -38,33 +38,35 @@ nu23f    = 0.7
 a1       = 50e-6             #[m]
 a2       = 3.5e-6            #[m]
 a3       = 3.5e-6            #[m]
-#%%
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Load tomography data
-eig_vec_full    = scipy.io.loadmat(os.path.join(data_path, 'vec.mat'))['vec']
-eig_val_full    = scipy.io.loadmat(os.path.join(data_path, 'val.mat'))['val']
-scatt           = scipy.io.loadmat(os.path.join(data_path, 'scatt.mat'))['rec']
-scatt_pure_peek = scipy.io.loadmat(os.path.join(data_path, 'scatt_pure_peek.mat'))['rec']
+eig_vec_cf_peek      = scipy.io.loadmat(os.path.join(data_path, 'vec.mat'))['vec']
+eig_val_cf_peek      = scipy.io.loadmat(os.path.join(data_path, 'val.mat'))['val']
+eig_val_peek         = scipy.io.loadmat(os.path.join(data_path, 'val_peek.mat'))['val']
 print('Data loaded')
 ##----------------------------------------------------------------------------------------------------------------------
 #%% 
-#Reduced data size
-#The fiber orientation should be chosen from the data as 
-#ori = vec(x_ind, y_ind, z_ind, :, 3). 
-ori    = eig_vec_full[200:203,200:203,200:203,:,2]
+mean_scattering_cf_peek_array   = np.mean(eig_val_cf_peek, axis=-1)
+mean_scattering_cf_peek_value   = np.mean(eig_val_cf_peek, where=eig_val_cf_peek>0.4)
+#%% 
+mean_scattering_pure_peek_array = np.mean(eig_val_peek, axis=-1)
+mean_scattering_pure_peek_value = np.mean(eig_val_peek, where=eig_val_peek>0.25)
+#%% Linear Correlation between scattering and fibre volume fraction
+mean_Vf          = 0.199
+slope            = (mean_scattering_cf_peek_value-mean_scattering_pure_peek_value)/mean_Vf
+Vf_tomo          = (mean_scattering_cf_peek_array-mean_scattering_pure_peek_value)/slope
+##----------------------------------------------------------------------------------------------------------------------
+#%% 
+# Adjust the size of the arrays, very small here for fast computation
+ori      = eig_vec_cf_peek[200:203,200:203,200:203,:,2]
 # 1st Eigenvalue
-lambda1  = eig_val_full[200:203,200:203,200:203,0]
+lambda1  = eig_val_cf_peek[200:203,200:203,200:203,0]
 # 2nd Eigenvalue
-lambda2  = eig_val_full[200:203,200:203,200:203,1]
+lambda2  = eig_val_cf_peek[200:203,200:203,200:203,1]
 # 3rd Eigenvalue
-lambda3  = eig_val_full[200:203,200:203,200:203,2]
-##-----------------------------------------------------------------------------
-mean_scattering_cf_peek    = np.mean(scatt[:,:,:,2], where=scatt[:,:,:,2]>0)
-mean_scattering_pure_peek  = np.mean(scatt_pure_peek[:,:,:,2], where=scatt_pure_peek[:,:,:,2]>0)
-##-----------------------------------------------------------------------------
-slope            = (mean_scattering_cf_peek-mean_scattering_pure_peek)/Vf_mean
-Vf_tomo          = (scatt[:,:,:,2]-mean_scattering_pure_peek)/slope
-scatt_threshold  = 0.1*mean_scattering_cf_peek
+lambda3  = eig_val_cf_peek[200:203,200:203,200:203,2]
+# Scattering array
+mean_scattering_cf_peek_array_loop = mean_scattering_cf_peek_array[200:203,200:203,200:203]
 print('Initialisation done')
 ##----------------------------------------------------------------------------------------------------------------------
 #%% Write Abaqus input file
@@ -93,101 +95,102 @@ with open(os.path.join(results_path, 'mesh.inp'), 'w') as output:
     output.write('*Node' '\n')
     
     for l in range(0,z_shape):
-        for k in range(0,y_shape+1):
-            for h in range(0,x_shape+1):
+        for k in range(0,y_shape):
+            for h in range(0,x_shape):
                 kk=kk+1
-                # Node definition
-                n8 = kk
-                n7 = kk+1
-                n5 = kk+x_shape+1
-                n6 = kk+x_shape+1+1
-                n4 = kk+(x_shape+1)*(y_shape+1)
-                n3 = kk+(x_shape+1)*(y_shape+1)+1
-                n1 = kk+(x_shape+1)*(y_shape+1)+x_shape+1
-                n2 = kk+(x_shape+1)*(y_shape+1)+1+x_shape+1
+                if mean_scattering_cf_peek_array_loop[h*binning,k*binning,l*binning] > 0.6*mean_scattering_cf_peek_value:
+                    # Node definition
+                    n8 = kk
+                    n7 = kk+1
+                    n5 = kk+x_shape+1
+                    n6 = kk+x_shape+1+1
+                    n4 = kk+(x_shape+1)*(y_shape+1)
+                    n3 = kk+(x_shape+1)*(y_shape+1)+1
+                    n1 = kk+(x_shape+1)*(y_shape+1)+x_shape+1
+                    n2 = kk+(x_shape+1)*(y_shape+1)+1+x_shape+1
 
-                if l == z_shape or k == y_shape or h == x_shape:
-                    ee = ee-1
-                else:
-                    elements[ee-1,0] = ee
-                    elements[ee-1,8] = n8
-                    elements[ee-1,7] = n7
-                    elements[ee-1,5] = n5
-                    elements[ee-1,6] = n6
-                    elements[ee-1,4] = n4
-                    elements[ee-1,3] = n3
-                    elements[ee-1,1] = n1
-                    elements[ee-1,2] = n2
+                    if l == z_shape or k == y_shape or h == x_shape:
+                        ee = ee-1
+                    else:
+                        elements[ee-1,0] = ee
+                        elements[ee-1,8] = n8
+                        elements[ee-1,7] = n7
+                        elements[ee-1,5] = n5
+                        elements[ee-1,6] = n6
+                        elements[ee-1,4] = n4
+                        elements[ee-1,3] = n3
+                        elements[ee-1,1] = n1
+                        elements[ee-1,2] = n2
 
-#                       Node 8:
-                    nodes[n8-1,0] = n8
-                    nodes[n8-1,1] = startX+h*es
-                    nodes[n8-1,2] = startY+k*es
-                    nodes[n8-1,3] = startZ+l*es
-
-
-#                       Node 7:
-                    nodes[n7-1,0] = n7
-                    nodes[n7-1,1] = startX+h*es + es
-                    nodes[n7-1,2] = startY+k*es
-                    nodes[n7-1,3] = startZ+l*es
+    #                       Node 8:
+                        nodes[n8-1,0] = n8
+                        nodes[n8-1,1] = startX+h*es
+                        nodes[n8-1,2] = startY+k*es
+                        nodes[n8-1,3] = startZ+l*es
 
 
-#                       Node 6:                
-                    nodes[n6-1,0] = n6
-                    nodes[n6-1,1] = startX+h*es + es
-                    nodes[n6-1,2] = startY+k*es + es
-                    nodes[n6-1,3] = startZ+l*es
+    #                       Node 7:
+                        nodes[n7-1,0] = n7
+                        nodes[n7-1,1] = startX+h*es + es
+                        nodes[n7-1,2] = startY+k*es
+                        nodes[n7-1,3] = startZ+l*es
 
 
-#                       Node 5:
-                    nodes[n5-1,0] = n5
-                    nodes[n5-1,1] = startX+h*es
-                    nodes[n5-1,2] = startY+k*es + es
-                    nodes[n5-1,3] = startZ+l*es
+    #                       Node 6:                
+                        nodes[n6-1,0] = n6
+                        nodes[n6-1,1] = startX+h*es + es
+                        nodes[n6-1,2] = startY+k*es + es
+                        nodes[n6-1,3] = startZ+l*es
 
 
-#                       Node 4:
-                    nodes[n4-1,0] = n4
-                    nodes[n4-1,1] = startX+h*es
-                    nodes[n4-1,2] = startY+k*es
-                    nodes[n4-1,3] = startZ+l*es + es
+    #                       Node 5:
+                        nodes[n5-1,0] = n5
+                        nodes[n5-1,1] = startX+h*es
+                        nodes[n5-1,2] = startY+k*es + es
+                        nodes[n5-1,3] = startZ+l*es
 
 
-#                       Node 3:
-                    nodes[n3-1,0] = n3
-                    nodes[n3-1,1] = startX+h*es + es
-                    nodes[n3-1,2] = startY+k*es
-                    nodes[n3-1,3] = startZ+l*es + es
+    #                       Node 4:
+                        nodes[n4-1,0] = n4
+                        nodes[n4-1,1] = startX+h*es
+                        nodes[n4-1,2] = startY+k*es
+                        nodes[n4-1,3] = startZ+l*es + es
 
 
-#                       Node 2:                        
-                    nodes[n2-1,0] = n2
-                    nodes[n2-1,1] = startX+h*es + es
-                    nodes[n2-1,2] = startY+k*es + es
-                    nodes[n2-1,3] = startZ+l*es + es
+    #                       Node 3:
+                        nodes[n3-1,0] = n3
+                        nodes[n3-1,1] = startX+h*es + es
+                        nodes[n3-1,2] = startY+k*es
+                        nodes[n3-1,3] = startZ+l*es + es
 
 
-#                       Node 1:
-                    nodes[n1-1,0] = n1
-                    nodes[n1-1,1] = startX+h*es
-                    nodes[n1-1,2] = startY+k*es + es
-                    nodes[n1-1,3] = startZ+l*es + es
-                    
-                    X0              = startX+h*es
-                    Y0              = startY+k*es
-                    Z0              = startZ+l*es
-                    
-                    IP_coords[ee-1][0][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.785]
-                    IP_coords[ee-1][1][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.785]
-                    IP_coords[ee-1][2][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.785]
-                    IP_coords[ee-1][3][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.785]
-                    IP_coords[ee-1][4][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.215]
-                    IP_coords[ee-1][5][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.215]
-                    IP_coords[ee-1][6][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.215]
-                    IP_coords[ee-1][7][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.215]     
+    #                       Node 2:                        
+                        nodes[n2-1,0] = n2
+                        nodes[n2-1,1] = startX+h*es + es
+                        nodes[n2-1,2] = startY+k*es + es
+                        nodes[n2-1,3] = startZ+l*es + es
 
-                ee=ee+1           
+
+    #                       Node 1:
+                        nodes[n1-1,0] = n1
+                        nodes[n1-1,1] = startX+h*es
+                        nodes[n1-1,2] = startY+k*es + es
+                        nodes[n1-1,3] = startZ+l*es + es
+                        
+                        X0              = startX+h*es
+                        Y0              = startY+k*es
+                        Z0              = startZ+l*es
+                        
+                        IP_coords[ee-1][0][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.785]
+                        IP_coords[ee-1][1][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.785]
+                        IP_coords[ee-1][2][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.785]
+                        IP_coords[ee-1][3][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.785]
+                        IP_coords[ee-1][4][:] = [X0+es*0.215, Y0+es*0.785, Z0+es*0.215]
+                        IP_coords[ee-1][5][:] = [X0+es*0.785, Y0+es*0.785, Z0+es*0.215]
+                        IP_coords[ee-1][6][:] = [X0+es*0.215, Y0+es*0.215, Z0+es*0.215]
+                        IP_coords[ee-1][7][:] = [X0+es*0.785, Y0+es*0.215, Z0+es*0.215]     
+
+                    ee=ee+1           
     noEl      = ee-1
     print(noEl)
     IP_coords = IP_coords[0:noEl]
